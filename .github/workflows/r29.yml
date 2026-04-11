@@ -1,4 +1,4 @@
-name: Android Static Build ipset
+name: Android Static Build ipset r29
 
 on:
   workflow_dispatch:
@@ -96,9 +96,9 @@ jobs:
           export AR=$TOOLCHAIN/llvm-ar
           export RANLIB=$TOOLCHAIN/llvm-ranlib
           export PKG_CONFIG_PATH=$SYSROOT/usr/local/lib/pkgconfig
-          export CFLAGS="-O3-I$SYSR00T/usr/local/include"
-          export LDFLAGS="-L$SYSRO0T/usr/local/lib-static -Wl,-z,max-page-size=16384"
-
+          export CFLAGS="-O3 -I$SYSROOT/usr/local/include"
+          export LDFLAGS="-L$SYSROOT/usr/local/lib -static -Wl,-z,max-page-size=16384"
+          
           ./autogen.sh
           ./configure \
             --host=$TARGET \
@@ -115,7 +115,8 @@ jobs:
             
           make -j$(nproc)
           make install DESTDIR=$SYSROOT
-
+          
+          find $SYSROOT/usr/local/sbin -type f -executable -exec $TOOLCHAIN/llvm-strip --strip-all {} \;
           find $SYSROOT -type f \( -executable -o -name "*.a" \) -exec $TOOLCHAIN/llvm-strip --strip-all {} \;
 
       - name: Upload artifacts
