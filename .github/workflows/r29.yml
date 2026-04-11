@@ -23,16 +23,24 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Android NDK
-        uses: nttld/setup-ndk@v1
+        uses: nttld/setup-ndk@v1.6.0
         with:
-          ndk-version: ${{ github.event.inputs.ndk_version }}
+          ndk-version: ${{ github.event.inputs.ndk_version || 'r27c' }}
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git automake autoconf libtool libltdl-dev pkg-config gcc perl
+          sudo apt-get install -y \
+            git \
+            automake \
+            autoconf \
+            libtool \
+            libltdl-dev \
+            pkg-config \
+            gcc \
+            perl
 
-      - name: Clone source code
+      - name: Clone ipset and libmnl
         run: |
           git clone --depth 1 https://git.netfilter.org/ipset.git
           git clone --depth 1 https://git.netfilter.org/libmnl.git
@@ -40,18 +48,18 @@ jobs:
       - name: Set build parameters
         id: vars
         run: |
-          case "${{ github.event.inputs.target_arch }}" in
+          case "${{ github.event.inputs.target_arch || 'aarch64' }}" in
             aarch64) target="aarch64-linux-android" ;;
             arm) target="armv7a-linux-androideabi" ;;
             x86_64) target="x86_64-linux-android" ;;
             i686) target="i686-linux-android" ;;
-            *) exit 1 ;;
+            *) echo "Unsupported architecture"; exit 1 ;;
           esac
           echo "target=$target" >> $GITHUB_OUTPUT
-          echo "api=${{ github.event.inputs.android_api }}" >> $GITHUB_OUTPUT
+          echo "api=${{ github.event.inputs.android_api || '30' }}" >> $GITHUB_OUTPUT
           echo "sysroot=$GITHUB_WORKSPACE/sysroot" >> $GITHUB_OUTPUT
 
-      - name: Build libmnl (Static)
+      - name: Build libmnl
         run: |
           cd libmnl
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -69,12 +77,14 @@ jobs:
             --enable-static \
             --disable-shared \
             --prefix=/usr/local \
-            CC="$CC" AR="$AR" RANLIB="$RANLIB"
+            CC=$CC \
+            AR=$AR \
+            RANLIB=$RANLIB
 
           make -j$(nproc)
           make install DESTDIR=$SYSROOT
 
-      - name: Build ipset (Truly Static)
+      - name: Build ipset
         run: |
           cd ipset
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -86,9 +96,8 @@ jobs:
           export AR=$TOOLCHAIN/llvm-ar
           export RANLIB=$TOOLCHAIN/llvm-ranlib
           export PKG_CONFIG_PATH=$SYSROOT/usr/local/lib/pkgconfig
-
-          export CFLAGS="-O3 -I$SYSROOT/usr/local/include"
-          export LDFLAGS="-L$SYSROOT/usr/local/lib -static -Wl,-static -Wl,-z,max-page-size=16384"
+          export CFLAGS="-O3-I$SYSR00T/usr/local/include"
+          export LDFLAGS="-L$SYSRO0T/usr/local/lib-static -Wl,-z,max-page-size=16384"
 
           ./autogen.sh
           ./configure \
@@ -97,22 +106,20 @@ jobs:
             --enable-static \
             --with-kmod=no \
             --prefix=/usr/local \
-            CC="$CC" \
-            AR="$AR" \
-            RANLIB="$RANLIB" \
+            CC=$CC \
+            AR=$AR \
+            RANLIB=$RANLIB \
+            RANLIB=$RANLIB \
             CFLAGS="$CFLAGS" \
-            LDFLAGS="$LDFLAGS" \
-            libmnl_CFLAGS="-I$SYSROOT/usr/local/include" \
-            libmnl_LIBS="-L$SYSROOT/usr/local/lib -lmnl"
-
+            LDFLAGS="$LDFLAGS"
+            
           make -j$(nproc)
           make install DESTDIR=$SYSROOT
 
-          $TOOLCHAIN/llvm-strip --strip-all $SYSROOT/usr/local/sbin/ipset
-          file $SYSROOT/usr/local/sbin/ipset
+          find $SYSROOT -type f \( -executable -o -name "*.a" \) -exec $TOOLCHAIN/llvm-strip --strip-all {} \;
 
-      - name: Upload
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipset-static-${{ github.event.inputs.target_arch }}
-          path: ${{ steps.vars.outputs.sysroot }}/usr/local/sbin/ipset
+          name: android-${{ github.event.inputs.target_arch || 'aarch64' }}-ipset-static
+          path: ${{ steps.vars.outputs.sysroot }}/usr/local/
