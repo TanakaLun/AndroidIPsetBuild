@@ -1,0 +1,123 @@
+name: Android Static Build ipset (NDK r29)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_arch:
+        description: 'Target architecture (aarch64/arm/x86_64/i686)'
+        required: false
+        default: 'aarch64'
+      ndk_version:
+        description: 'Android NDK version'
+        required: false
+        default: 'r29'
+      android_api:
+        description: 'Android API level (Recommend 35 for 2026/Android 15)'
+        required: false
+        default: '35'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ github.event.inputs.ndk_version }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git automake autoconf libtool libltdl-dev pkg-config gcc perl
+
+      - name: Clone source code
+        run: |
+          git clone --depth 1 https://git.netfilter.org/ipset.git
+          git clone --depth 1 https://git.netfilter.org/libmnl.git
+
+      - name: Set build parameters
+        id: vars
+        run: |
+          case "${{ github.event.inputs.target_arch }}" in
+            aarch64) 
+              target="aarch64-linux-android"
+              ;;
+            arm) 
+              target="armv7a-linux-androideabi"
+              ;;
+            x86_64) 
+              target="x86_64-linux-android"
+              ;;
+            i686) 
+              target="i686-linux-android"
+              ;;
+            *) echo "Unsupported architecture"; exit 1 ;;
+          esac
+          echo "target=$target" >> $GITHUB_OUTPUT
+          echo "api=${{ github.event.inputs.android_api }}" >> $GITHUB_OUTPUT
+          echo "sysroot=$GITHUB_WORKSPACE/sysroot" >> $GITHUB_OUTPUT
+
+      - name: Build libmnl (Static)
+        run: |
+          cd libmnl
+          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          export TARGET=${{ steps.vars.outputs.target }}
+          export API=${{ steps.vars.outputs.api }}
+          export SYSROOT=${{ steps.vars.outputs.sysroot }}
+
+          # NDK r29 clang path logic
+          export CC=$TOOLCHAIN/${TARGET}${API}-clang
+          export AR=$TOOLCHAIN/llvm-ar
+          export RANLIB=$TOOLCHAIN/llvm-ranlib
+
+          ./autogen.sh
+          ./configure \
+            --host=$TARGET \
+            --enable-static \
+            --disable-shared \
+            --prefix=/usr/local \
+            CC=$CC AR=$AR RANLIB=$RANLIB
+
+          make -j$(nproc)
+          make install DESTDIR=$SYSROOT
+
+      - name: Build ipset (Static)
+        run: |
+          cd ipset
+          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          export TARGET=${{ steps.vars.outputs.target }}
+          export API=${{ steps.vars.outputs.api }}
+          export SYSROOT=${{ steps.vars.outputs.sysroot }}
+
+          export CC=$TOOLCHAIN/${TARGET}${API}-clang
+          export AR=$TOOLCHAIN/llvm-ar
+          export RANLIB=$TOOLCHAIN/llvm-ranlib
+          export PKG_CONFIG_PATH=$SYSROOT/usr/local/lib/pkgconfig
+
+          export CFLAGS="-O3 -I$SYSROOT/usr/local/include"
+          export LDFLAGS="-L$SYSROOT/usr/local/lib -static -Wl,-z,max-page-size=16384"
+
+          ./autogen.sh
+          ./configure \
+            --host=$TARGET \
+            --disable-shared \
+            --enable-static \
+            --with-kmod=no \
+            --prefix=/usr/local \
+            CC=$CC AR=$AR RANLIB=$RANLIB \
+            CFLAGS="$CFLAGS" \
+            LDFLAGS="$LDFLAGS"
+
+          make -j$(nproc)
+          make install DESTDIR=$SYSROOT
+
+          find $SYSROOT/usr/local/sbin -type f -executable -exec $TOOLCHAIN/llvm-strip --strip-all {} \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipset-static-${{ github.event.inputs.target_arch }}-api${{ github.event.inputs.android_api }}
+          path: ${{ steps.vars.outputs.sysroot }}/usr/local/sbin/
