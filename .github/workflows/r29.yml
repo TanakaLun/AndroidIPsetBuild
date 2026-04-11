@@ -1,4 +1,4 @@
-name: Android Static Build ipset (NDK r29)
+name: Android Static Build ipset
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: false
         default: 'r29'
       android_api:
-        description: 'Android API level (Recommend 35 for 2026/Android 15)'
+        description: 'Android API level'
         required: false
         default: '35'
 
@@ -30,8 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git automake autoconf libtool libltdl-dev pkg-config gcc perl
+          sudo apt-get install -y git automake autoconf libtool libltdl-dev pkg-config gcc perl
 
       - name: Clone source code
         run: |
@@ -42,19 +41,11 @@ jobs:
         id: vars
         run: |
           case "${{ github.event.inputs.target_arch }}" in
-            aarch64) 
-              target="aarch64-linux-android"
-              ;;
-            arm) 
-              target="armv7a-linux-androideabi"
-              ;;
-            x86_64) 
-              target="x86_64-linux-android"
-              ;;
-            i686) 
-              target="i686-linux-android"
-              ;;
-            *) echo "Unsupported architecture"; exit 1 ;;
+            aarch64) target="aarch64-linux-android" ;;
+            arm) target="armv7a-linux-androideabi" ;;
+            x86_64) target="x86_64-linux-android" ;;
+            i686) target="i686-linux-android" ;;
+            *) exit 1 ;;
           esac
           echo "target=$target" >> $GITHUB_OUTPUT
           echo "api=${{ github.event.inputs.android_api }}" >> $GITHUB_OUTPUT
@@ -68,7 +59,6 @@ jobs:
           export API=${{ steps.vars.outputs.api }}
           export SYSROOT=${{ steps.vars.outputs.sysroot }}
 
-          # NDK r29 clang path logic
           export CC=$TOOLCHAIN/${TARGET}${API}-clang
           export AR=$TOOLCHAIN/llvm-ar
           export RANLIB=$TOOLCHAIN/llvm-ranlib
@@ -79,12 +69,12 @@ jobs:
             --enable-static \
             --disable-shared \
             --prefix=/usr/local \
-            CC=$CC AR=$AR RANLIB=$RANLIB
+            CC="$CC" AR="$AR" RANLIB="$RANLIB"
 
           make -j$(nproc)
           make install DESTDIR=$SYSROOT
 
-      - name: Build ipset (Static)
+      - name: Build ipset (Truly Static)
         run: |
           cd ipset
           export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -98,7 +88,7 @@ jobs:
           export PKG_CONFIG_PATH=$SYSROOT/usr/local/lib/pkgconfig
 
           export CFLAGS="-O3 -I$SYSROOT/usr/local/include"
-          export LDFLAGS="-L$SYSROOT/usr/local/lib -static -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-L$SYSROOT/usr/local/lib -static -Wl,-static -Wl,-z,max-page-size=16384"
 
           ./autogen.sh
           ./configure \
@@ -107,17 +97,22 @@ jobs:
             --enable-static \
             --with-kmod=no \
             --prefix=/usr/local \
-            CC=$CC AR=$AR RANLIB=$RANLIB \
+            CC="$CC" \
+            AR="$AR" \
+            RANLIB="$RANLIB" \
             CFLAGS="$CFLAGS" \
-            LDFLAGS="$LDFLAGS"
+            LDFLAGS="$LDFLAGS" \
+            libmnl_CFLAGS="-I$SYSROOT/usr/local/include" \
+            libmnl_LIBS="-L$SYSROOT/usr/local/lib -lmnl"
 
           make -j$(nproc)
           make install DESTDIR=$SYSROOT
 
-          find $SYSROOT/usr/local/sbin -type f -executable -exec $TOOLCHAIN/llvm-strip --strip-all {} \;
+          $TOOLCHAIN/llvm-strip --strip-all $SYSROOT/usr/local/sbin/ipset
+          file $SYSROOT/usr/local/sbin/ipset
 
-      - name: Upload artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ipset-static-${{ github.event.inputs.target_arch }}-api${{ github.event.inputs.android_api }}
-          path: ${{ steps.vars.outputs.sysroot }}/usr/local/sbin/
+          name: ipset-static-${{ github.event.inputs.target_arch }}
+          path: ${{ steps.vars.outputs.sysroot }}/usr/local/sbin/ipset
