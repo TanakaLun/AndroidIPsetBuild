@@ -10,7 +10,7 @@ on:
       ndk_version:
         description: 'Android NDK version'
         required: false
-        default: 'r29'
+        default: 'r29-beta1'
       android_api:
         description: 'Android API level'
         required: false
