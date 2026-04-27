@@ -26,7 +26,7 @@ jobs:
         uses: nttld/setup-ndk@v1.6.0
         id: setup-ndk
         with:
-          ndk-version: r29-beta1
+          check-latest: true
 
       - name: Install dependencies
         run: |
