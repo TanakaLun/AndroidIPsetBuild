@@ -26,6 +26,7 @@ jobs:
         uses: nttld/setup-ndk@v1.6.0
         id: setup-ndk
         with:
+          ndk-version: r29-beta1
           check-latest: true
 
       - name: Install dependencies
@@ -63,7 +64,7 @@ jobs:
       - name: Build libmnl
         run: |
           cd libmnl
-          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          export TOOLCHAIN=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin
           export TARGET=${{ steps.vars.outputs.target }}
           export API=${{ steps.vars.outputs.api }}
           export SYSROOT=${{ steps.vars.outputs.sysroot }}
